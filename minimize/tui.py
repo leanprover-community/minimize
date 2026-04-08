@@ -20,12 +20,20 @@ STATUS_STYLES = {
     "created": "dim",
     "cache_get": "blue",
     "building": "blue",
+    "building_cross": "blue",
     "running": "blue",
     "completed": "green",
     "failed": "red",
     "killed": "dim",
     "unknown": "yellow",
 }
+
+
+def _short_toolchain(tc: str) -> str:
+    """Shorten a toolchain name for display."""
+    if ":" in tc:
+        return tc.split(":")[-1]
+    return tc
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -153,7 +161,7 @@ class MinimizeDashboard(App):
     def compose(self) -> ComposeResult:
         yield Header()
         table = DataTable(id="job-table", cursor_type="row")
-        table.add_columns("Status", "File", "Project", "Duration", "LOC", "Imports", "Note")
+        table.add_columns("Status", "File", "Project", "Cross TC", "Duration", "LOC", "Imports", "Note")
         yield table
         yield RichLog(id="log-pane", highlight=True, markup=True)
         yield Footer()
@@ -170,7 +178,7 @@ class MinimizeDashboard(App):
         self.jobs = self.store.load()
 
         for job in self.jobs:
-            if job.status not in ("created", "cache_get", "building", "running"):
+            if job.status not in ("created", "cache_get", "building", "building_cross", "running"):
                 continue
             try:
                 running = is_running(job)
@@ -196,7 +204,7 @@ class MinimizeDashboard(App):
                     )
             else:
                 phase = detect_phase(job.workspace_path())
-                if phase in ("cache_get", "building", "running") and phase != job.status:
+                if phase in ("cache_get", "building", "building_cross", "running") and phase != job.status:
                     self.store.update(job.id, status=phase)
 
         # Reload after updates
@@ -228,10 +236,13 @@ class MinimizeDashboard(App):
 
             filename = Path(job.source_file).stem
 
+            cross_str = _short_toolchain(job.cross_toolchain) if job.cross_toolchain else ""
+
             table.add_row(
                 f"[{style}]{status}[/{style}]",
                 filename,
                 job.project_name,
+                cross_str,
                 job.duration_str(),
                 loc_str,
                 imp_str,

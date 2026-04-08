@@ -22,6 +22,13 @@ from minimize.workspace import create_workspace
 console = Console()
 
 
+def _short_toolchain(tc: str) -> str:
+    """Shorten a toolchain name for display (e.g. 'leanprover/lean4:v4.27.0' -> 'v4.27.0')."""
+    if ":" in tc:
+        return tc.split(":")[-1]
+    return tc
+
+
 def _get_job(store: JobStore, job_id: str) -> Job:
     """Get a job by ID, handling ambiguous prefixes and missing jobs."""
     try:
@@ -49,9 +56,10 @@ def main(ctx: click.Context) -> None:
 @click.option("--marker", default="#guard_msgs", help="Marker pattern for the invariant")
 @click.option("--force", is_flag=True, help="Skip validation checks")
 @click.option("--note", default=None, help="Note to attach to the job")
+@click.option("--cross-toolchain", default=None, help="Second toolchain for cross-version minimization (e.g. leanprover/lean4:v4.27.0)")
 @click.option("--mirror-deps", is_flag=True, help="Mirror dependencies instead of using path dependency")
 @click.option("--extra-args", default="", help="Extra args for lake exe minimize (quote the whole string)")
-def run(lean_file: str, marker: str, force: bool, note: str | None, mirror_deps: bool, extra_args: str) -> None:
+def run(lean_file: str, marker: str, force: bool, note: str | None, cross_toolchain: str | None, mirror_deps: bool, extra_args: str) -> None:
     """Start a minimization job for LEAN_FILE."""
     lean_path = Path(lean_file).resolve()
 
@@ -71,6 +79,8 @@ def run(lean_file: str, marker: str, force: bool, note: str | None, mirror_deps:
 
     console.print(f"Project: [bold]{project.name}[/bold] ({root})")
     console.print(f"Lean: {project.lean_version}")
+    if cross_toolchain:
+        console.print(f"Cross toolchain: {cross_toolchain}")
     if has_mathlib_dependency(project):
         console.print("Mathlib dependency detected (will run cache get)")
 
@@ -94,6 +104,7 @@ def run(lean_file: str, marker: str, force: bool, note: str | None, mirror_deps:
         marker=marker,
         extra_args=parsed_extra,
         note=note,
+        cross_toolchain=cross_toolchain,
     )
 
     try:
@@ -122,11 +133,15 @@ def list_jobs() -> None:
         console.print("[dim]No jobs. Start one with: minimize run <file.lean>[/dim]")
         return
 
+    any_cross = any(j.cross_toolchain for j in jobs)
+
     table = Table(show_header=True)
     table.add_column("ID", style="bold")
     table.add_column("Status")
     table.add_column("File")
     table.add_column("Project")
+    if any_cross:
+        table.add_column("Cross TC")
     table.add_column("Duration")
     table.add_column("LOC")
     table.add_column("Imports")
@@ -137,6 +152,7 @@ def list_jobs() -> None:
 
         style = {
             "created": "dim", "cache_get": "blue", "building": "blue",
+            "building_cross": "blue",
             "running": "blue", "completed": "green", "failed": "red",
             "killed": "dim", "unknown": "yellow",
         }.get(job.status, "white")
@@ -145,16 +161,21 @@ def list_jobs() -> None:
         loc = get_output_loc(ws)
         imports = count_imports(ws)
 
-        table.add_row(
+        row: list[str] = [
             job.id,
             f"[{style}]{job.status.upper()}[/{style}]",
             Path(job.source_file).stem,
             job.project_name,
+        ]
+        if any_cross:
+            row.append(_short_toolchain(job.cross_toolchain) if job.cross_toolchain else "")
+        row.extend([
             job.duration_str(),
             str(loc) if loc is not None else "-",
             str(imports),
             (job.note or "")[:40],
-        )
+        ])
+        table.add_row(*row)
 
     console.print(table)
 
@@ -400,7 +421,7 @@ def clean(older_than: str | None, force: bool) -> None:
 
 def _reconcile_job(store: JobStore, job: Job) -> None:
     """Reconcile job status with tmux and log state."""
-    if job.status not in ("created", "cache_get", "building", "running"):
+    if job.status not in ("created", "cache_get", "building", "building_cross", "running"):
         return
     try:
         running = is_running(job)
@@ -408,7 +429,7 @@ def _reconcile_job(store: JobStore, job: Job) -> None:
         return
     if running:
         phase = detect_phase(job.workspace_path())
-        if phase in ("cache_get", "building", "running") and phase != job.status:
+        if phase in ("cache_get", "building", "building_cross", "running") and phase != job.status:
             store.update(job.id, status=phase)
             job.status = phase
     else:

@@ -83,12 +83,25 @@ Job IDs accept unambiguous prefixes (e.g., `minimize log 04a`).
 ### Options
 
 ```
-minimize run <file> --marker PATTERN     Custom marker (default: #guard_msgs)
-minimize run <file> --force              Skip #guard_msgs validation
-minimize run <file> --mirror-deps        Mirror deps instead of path dependency
-minimize run <file> --extra-args "..."   Extra args for lake exe minimize
-minimize clean --older-than 7d           Only clean jobs older than N days
+minimize run <file> --marker PATTERN          Custom marker (default: #guard_msgs)
+minimize run <file> --force                   Skip #guard_msgs validation
+minimize run <file> --cross-toolchain TC      Cross-version minimization
+minimize run <file> --mirror-deps             Mirror deps instead of path dependency
+minimize run <file> --extra-args "..."        Extra args for lake exe minimize
+minimize clean --older-than 7d               Only clean jobs older than N days
 ```
+
+### Cross-toolchain minimization
+
+To minimize a file that must compile under two different Lean versions:
+
+```bash
+minimize run MyFile.lean --cross-toolchain leanprover/lean4:v4.27.0
+```
+
+This builds with both the project's toolchain and the cross toolchain before
+running the minimizer with `--cross-toolchain`, ensuring the minimized result
+works on both versions. The TUI shows the cross toolchain in a dedicated column.
 
 ## How it works
 

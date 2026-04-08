@@ -30,7 +30,8 @@ def _generate_wrapper(job: Job) -> Path:
 
     extra = shlex.join(job.extra_args) if job.extra_args else ""
     marker_arg = f"--marker {shlex.quote(job.marker)}" if job.marker != "#guard_msgs" else ""
-    args = f"Minimize/Target.lean {marker_arg} {extra}".strip()
+    cross_arg = f"--cross-toolchain {shlex.quote(job.cross_toolchain)}" if job.cross_toolchain else ""
+    args = f"Minimize/Target.lean {marker_arg} {cross_arg} {extra}".strip()
 
     lines = [
         "#!/usr/bin/env bash",
@@ -55,6 +56,24 @@ def _generate_wrapper(job: Job) -> Path:
         '    echo "---MINIMIZE-EXIT:$build_exit---" >> minimize.log',
         "    exit $build_exit",
         "fi",
+    ])
+
+    if job.cross_toolchain:
+        ct = shlex.quote(job.cross_toolchain)
+        lines.extend([
+            "",
+            f'echo "---MINIMIZE-PHASE:building_cross---" >> minimize.log',
+            f"echo \"Building with cross toolchain: {job.cross_toolchain}\" 2>&1 | tee -a minimize.log",
+            f"elan run {ct} lake build 2>&1 | tee -a minimize.log",
+            "cross_exit=$?",
+            'if [ "$cross_exit" -ne 0 ]; then',
+            '    echo "Cross-toolchain build failed" 2>&1 | tee -a minimize.log',
+            '    echo "---MINIMIZE-EXIT:$cross_exit---" >> minimize.log',
+            "    exit $cross_exit",
+            "fi",
+        ])
+
+    lines.extend([
         "",
         'echo "---MINIMIZE-PHASE:running---" >> minimize.log',
         f"lake exe minimize {args} 2>&1 | tee -a minimize.log",

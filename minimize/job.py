@@ -29,6 +29,7 @@ class Job:
     error_summary: str | None = None
     note: str | None = None
     attempt: int = 1
+    cross_toolchain: str | None = None
 
     @staticmethod
     def create(
@@ -39,6 +40,7 @@ class Job:
         marker: str,
         extra_args: list[str] | None = None,
         note: str | None = None,
+        cross_toolchain: str | None = None,
     ) -> "Job":
         return Job(
             id=uuid4().hex[:8],
@@ -51,6 +53,7 @@ class Job:
             status="created",
             created_at=datetime.now(timezone.utc).isoformat(),
             note=note,
+            cross_toolchain=cross_toolchain,
         )
 
     def duration_str(self) -> str:

@@ -55,7 +55,7 @@ def detect_phase(workspace: Path) -> str:
 
     # Check phase markers (find the last one)
     last_phase = None
-    for phase in ("cache_get", "building", "running"):
+    for phase in ("cache_get", "building", "building_cross", "running"):
         marker = f"---MINIMIZE-PHASE:{phase}---"
         if marker in tail:
             idx = tail.rfind(marker)
