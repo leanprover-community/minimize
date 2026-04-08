@@ -152,7 +152,6 @@ def list_jobs() -> None:
 
         style = {
             "created": "dim", "cache_get": "blue", "building": "blue",
-            "building_cross": "blue",
             "running": "blue", "completed": "green", "failed": "red",
             "killed": "dim", "unknown": "yellow",
         }.get(job.status, "white")
@@ -421,7 +420,7 @@ def clean(older_than: str | None, force: bool) -> None:
 
 def _reconcile_job(store: JobStore, job: Job) -> None:
     """Reconcile job status with tmux and log state."""
-    if job.status not in ("created", "cache_get", "building", "building_cross", "running"):
+    if job.status not in ("created", "cache_get", "building", "running"):
         return
     try:
         running = is_running(job)
@@ -429,7 +428,7 @@ def _reconcile_job(store: JobStore, job: Job) -> None:
         return
     if running:
         phase = detect_phase(job.workspace_path())
-        if phase in ("cache_get", "building", "building_cross", "running") and phase != job.status:
+        if phase in ("cache_get", "building", "running") and phase != job.status:
             store.update(job.id, status=phase)
             job.status = phase
     else:

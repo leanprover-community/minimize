@@ -20,7 +20,6 @@ STATUS_STYLES = {
     "created": "dim",
     "cache_get": "blue",
     "building": "blue",
-    "building_cross": "blue",
     "running": "blue",
     "completed": "green",
     "failed": "red",
@@ -178,7 +177,7 @@ class MinimizeDashboard(App):
         self.jobs = self.store.load()
 
         for job in self.jobs:
-            if job.status not in ("created", "cache_get", "building", "building_cross", "running"):
+            if job.status not in ("created", "cache_get", "building", "running"):
                 continue
             try:
                 running = is_running(job)
@@ -204,7 +203,7 @@ class MinimizeDashboard(App):
                     )
             else:
                 phase = detect_phase(job.workspace_path())
-                if phase in ("cache_get", "building", "building_cross", "running") and phase != job.status:
+                if phase in ("cache_get", "building", "running") and phase != job.status:
                     self.store.update(job.id, status=phase)
 
         # Reload after updates
