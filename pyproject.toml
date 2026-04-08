@@ -1,0 +1,21 @@
+[project]
+name = "minimize"
+version = "0.1.0"
+description = "TUI for managing Lean 4 minimization jobs"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "textual>=0.50",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[project.urls]
+Repository = "https://github.com/leanprover-community/minimize"
+
+[project.scripts]
+minimize = "minimize.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
