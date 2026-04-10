@@ -1,10 +1,53 @@
 """Workspace creation: generate lakefile.toml, copy target file, validate."""
 
 import hashlib
+import subprocess
 from pathlib import Path
 
 from minimize.config import MINIMIZE_DIR, LEAN_MINIMIZER_REPO, LEAN_MINIMIZER_REV
 from minimize.project import ProjectInfo, MinimizeError
+
+
+def _resolve_git_info(project_root: Path) -> tuple[str, str] | None:
+    """Resolve git remote URL and HEAD commit for a project root.
+
+    Uses the current branch's upstream remote, falling back to origin.
+    Returns (remote_url, commit_hash) or None if not a git repo or no remote.
+    """
+    def _git(*args: str) -> str | None:
+        try:
+            r = subprocess.run(
+                ["git", *args],
+                cwd=project_root, capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() if r.returncode == 0 else None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+    commit = _git("rev-parse", "HEAD")
+    if not commit:
+        return None
+
+    # Ensure the Lake package root is the git repo root (not a monorepo subdir)
+    git_toplevel = _git("rev-parse", "--show-toplevel")
+    if git_toplevel and Path(git_toplevel).resolve() != project_root.resolve():
+        return None  # subdir package; git dep without subDir would be wrong
+
+    # Strategy 1: upstream remote of the current branch
+    remote_name = None
+    branch = _git("branch", "--show-current")
+    if branch:
+        remote_name = _git("config", "--get", f"branch.{branch}.remote")
+
+    # Strategy 2: fall back to 'origin'
+    if not remote_name:
+        remote_name = "origin"
+
+    url = _git("remote", "get-url", remote_name)
+    if url:
+        return (url, commit)
+
+    return None
 
 
 def workspace_dir(project_name: str, filename: str, source_file: Path) -> Path:
@@ -28,13 +71,26 @@ def generate_lakefile_toml(project: ProjectInfo, use_path_dep: bool = True) -> s
     ]
 
     if use_path_dep:
-        # Strategy A: use the source project as a path dependency
-        lines.extend([
-            "[[require]]",
-            f"name = {_toml_str(project.name)}",
-            f"path = {_toml_str(str(project.root))}",
-            "",
-        ])
+        # Try to resolve the source project to a git dependency for reproducibility
+        # and compatibility with import inlining (which searches .lake/packages/).
+        git_info = _resolve_git_info(project.root)
+        if git_info is not None:
+            git_url, git_rev = git_info
+            lines.extend([
+                "[[require]]",
+                f"name = {_toml_str(project.name)}",
+                f"git = {_toml_str(git_url)}",
+                f"rev = {_toml_str(git_rev)}",
+                "",
+            ])
+        else:
+            # Fallback: not a git repo, no remote, or monorepo subdir
+            lines.extend([
+                "[[require]]",
+                f"name = {_toml_str(project.name)}",
+                f"path = {_toml_str(str(project.root))}",
+                "",
+            ])
     else:
         # Strategy B: mirror direct dependencies
         for dep in project.dependencies:
