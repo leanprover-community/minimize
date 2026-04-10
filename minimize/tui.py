@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.markup import escape as markup_escape
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -170,6 +170,7 @@ class MinimizeDashboard(App):
         self.store = JobStore()
         self.jobs: list[Job] = []
         self.log_job_id: str | None = None
+        self._update_available = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -182,6 +183,43 @@ class MinimizeDashboard(App):
     def on_mount(self) -> None:
         self._refresh_jobs()
         self.set_interval(5, self._refresh_jobs)
+        self._check_for_updates()
+
+    @work(thread=True)
+    def _check_for_updates(self) -> None:
+        """Check for updates in a background thread (non-blocking)."""
+        from minimize.version import is_outdated
+        outdated, _, _ = is_outdated()
+        if outdated:
+            self._update_available = True
+            self.call_from_thread(self._show_update_binding)
+
+    def _show_update_binding(self) -> None:
+        self.notify("Update available! Press [bold]u[/bold] to update.", severity="information")
+        # Dynamically bind 'u'
+        self.bind("u", "update", description="Update available!")
+
+    def action_update(self) -> None:
+        if not self._update_available:
+            self.notify("Already up to date", severity="information")
+            return
+        self.notify("Updating... (this may take a moment)")
+        self._run_update()
+
+    @work(thread=True)
+    def _run_update(self) -> None:
+        from minimize.version import REPO_URL
+        result = subprocess.run(
+            ["uv", "tool", "install", "--force", f"git+{REPO_URL}"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            self.call_from_thread(
+                self.notify, "Updated! Restart minimize to use the new version.", severity="information"
+            )
+        else:
+            msg = result.stderr.strip().splitlines()[-1] if result.stderr else "Update failed"
+            self.call_from_thread(self.notify, msg, severity="error")
 
     def _refresh_jobs(self) -> None:
         """Reload jobs and reconcile status with tmux.
