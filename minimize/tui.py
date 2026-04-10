@@ -153,7 +153,8 @@ class MinimizeDashboard(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("enter", "open_vscode", "Open VSCode"),
+        Binding("enter", "open_vscode", "Open workspace"),
+        Binding("o", "open_source", "Open source project"),
         Binding("a", "attach", "Attach (Ctrl-b d to detach)"),
         Binding("l", "toggle_log", "Log"),
         Binding("k", "kill", "Kill"),
@@ -291,6 +292,24 @@ class MinimizeDashboard(App):
             )
         except FileNotFoundError:
             self.notify("VS Code ('code') not found", severity="error")
+
+    def action_open_source(self) -> None:
+        job = self._selected_job()
+        if not job:
+            return
+        source = Path(job.source_file)
+        try:
+            from minimize.project import find_project_root
+            root = find_project_root(source)
+            subprocess.Popen(
+                ["code", str(root), str(source)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            self.notify("VS Code ('code') not found", severity="error")
+        except Exception as e:
+            self.notify(f"Could not find project root: {e}", severity="error")
 
     def action_attach(self) -> None:
         job = self._selected_job()
