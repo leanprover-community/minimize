@@ -141,7 +141,7 @@ class MinimizeDashboard(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("enter", "open_vscode", "Open VSCode"),
-        Binding("a", "attach", "Attach"),
+        Binding("a", "attach", "Attach (Ctrl-b d to detach)"),
         Binding("l", "toggle_log", "Log"),
         Binding("k", "kill", "Kill"),
         Binding("d", "delete", "Delete"),
