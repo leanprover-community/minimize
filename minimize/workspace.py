@@ -1,6 +1,7 @@
 """Workspace creation: generate lakefile.toml, copy target file, validate."""
 
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -48,6 +49,26 @@ def _resolve_git_info(project_root: Path) -> tuple[str, str] | None:
         return (url, commit)
 
     return None
+
+
+def _git_init(ws: Path) -> None:
+    """Initialize the workspace as a git repo with an initial commit."""
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "minimize",
+        "GIT_AUTHOR_EMAIL": "minimize@localhost",
+        "GIT_COMMITTER_NAME": "minimize",
+        "GIT_COMMITTER_EMAIL": "minimize@localhost",
+    }
+    try:
+        subprocess.run(["git", "init"], cwd=ws, capture_output=True, check=True)
+        subprocess.run(["git", "add", "."], cwd=ws, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial workspace"],
+            cwd=ws, capture_output=True, check=True, env=env,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass  # git not available or failed; not critical
 
 
 def workspace_dir(project_name: str, filename: str, source_file: Path) -> Path:
@@ -198,5 +219,11 @@ def create_workspace(
 
     # Write root module
     (ws / "Minimize.lean").write_text("import Minimize.Target\n")
+
+    # Write .gitignore for Lake build artifacts
+    (ws / ".gitignore").write_text(".lake/\nlake-manifest.json\nminimize.log\n")
+
+    # Initialize as a git repo so changes from the minimizer can be tracked
+    _git_init(ws)
 
     return ws
