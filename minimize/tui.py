@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rich.markup import escape as markup_escape
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -38,6 +39,28 @@ def _short_toolchain(tc: str) -> str:
 class ConfirmDialog(ModalScreen[bool]):
     """Simple yes/no confirmation dialog."""
 
+    CSS = """
+    ConfirmDialog {
+        align: center middle;
+    }
+    #confirm-dialog {
+        width: 50;
+        height: auto;
+        max-height: 10;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #confirm-message {
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #confirm-hint {
+        text-align: center;
+        color: $text-muted;
+    }
+    """
+
     BINDINGS = [
         Binding("y", "confirm", "Yes"),
         Binding("n", "cancel", "No"),
@@ -64,6 +87,23 @@ class ConfirmDialog(ModalScreen[bool]):
 
 class NoteDialog(ModalScreen[str | None]):
     """Dialog for editing a job note."""
+
+    CSS = """
+    NoteDialog {
+        align: center middle;
+    }
+    #note-dialog {
+        width: 60;
+        height: auto;
+        max-height: 10;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #note-label {
+        margin-bottom: 1;
+    }
+    """
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -108,33 +148,6 @@ class MinimizeDashboard(App):
     }
     #log-pane.visible {
         display: block;
-    }
-    #confirm-dialog {
-        align: center middle;
-        width: 50;
-        height: 7;
-        border: thick $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #confirm-message {
-        text-align: center;
-        margin-bottom: 1;
-    }
-    #confirm-hint {
-        text-align: center;
-        color: $text-muted;
-    }
-    #note-dialog {
-        align: center middle;
-        width: 60;
-        height: 7;
-        border: thick $accent;
-        background: $surface;
-        padding: 1 2;
-    }
-    #note-label {
-        margin-bottom: 1;
     }
     """
 
@@ -231,16 +244,15 @@ class MinimizeDashboard(App):
 
             loc_str = str(loc) if loc is not None else "-"
             imp_str = str(imports)
-            note_str = (job.note or "")[:30]
-
-            filename = Path(job.source_file).stem
-
-            cross_str = _short_toolchain(job.cross_toolchain) if job.cross_toolchain else ""
+            note_str = markup_escape((job.note or "")[:30])
+            filename = markup_escape(Path(job.source_file).stem)
+            project = markup_escape(job.project_name)
+            cross_str = markup_escape(_short_toolchain(job.cross_toolchain)) if job.cross_toolchain else ""
 
             table.add_row(
-                f"[{style}]{status}[/{style}]",
+                f"[{style}]{markup_escape(status)}[/{style}]",
                 filename,
-                job.project_name,
+                project,
                 cross_str,
                 job.duration_str(),
                 loc_str,

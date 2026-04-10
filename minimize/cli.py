@@ -10,6 +10,7 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.markup import escape as markup_escape
 from rich.table import Table
 
 from minimize.config import MINIMIZE_DIR
@@ -162,17 +163,17 @@ def list_jobs() -> None:
 
         row: list[str] = [
             job.id,
-            f"[{style}]{job.status.upper()}[/{style}]",
-            Path(job.source_file).stem,
-            job.project_name,
+            f"[{style}]{markup_escape(job.status.upper())}[/{style}]",
+            markup_escape(Path(job.source_file).stem),
+            markup_escape(job.project_name),
         ]
         if any_cross:
-            row.append(_short_toolchain(job.cross_toolchain) if job.cross_toolchain else "")
+            row.append(markup_escape(_short_toolchain(job.cross_toolchain)) if job.cross_toolchain else "")
         row.extend([
             job.duration_str(),
             str(loc) if loc is not None else "-",
             str(imports),
-            (job.note or "")[:40],
+            markup_escape((job.note or "")[:40]),
         ])
         table.add_row(*row)
 
