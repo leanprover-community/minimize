@@ -153,8 +153,8 @@ class MinimizeDashboard(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("enter", "open_vscode", "Open workspace"),
-        Binding("o", "open_source", "Open source project"),
+        Binding("enter", "open_output", "Open output"),
+        Binding("o", "open_source", "Open source"),
         Binding("a", "attach", "Attach (Ctrl-b d to detach)"),
         Binding("l", "toggle_log", "Log"),
         Binding("k", "kill", "Kill"),
@@ -315,7 +315,8 @@ class MinimizeDashboard(App):
             pass
         return None
 
-    def action_open_vscode(self) -> None:
+    def action_open_output(self) -> None:
+        """Open the minimized output (or source if no output yet) in VS Code."""
         job = self._selected_job()
         if not job:
             return
@@ -332,22 +333,20 @@ class MinimizeDashboard(App):
             self.notify("VS Code ('code') not found", severity="error")
 
     def action_open_source(self) -> None:
+        """Open the workspace's source file (Minimize/Target.lean) in VS Code."""
         job = self._selected_job()
         if not job:
             return
-        source = Path(job.source_file)
+        ws = job.workspace_path()
+        target = ws / "Minimize" / "Target.lean"
         try:
-            from minimize.project import find_project_root
-            root = find_project_root(source)
             subprocess.Popen(
-                ["code", str(root), str(source)],
+                ["code", str(ws), str(target)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
             self.notify("VS Code ('code') not found", severity="error")
-        except Exception as e:
-            self.notify(f"Could not find project root: {e}", severity="error")
 
     def action_attach(self) -> None:
         job = self._selected_job()
