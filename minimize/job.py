@@ -30,6 +30,7 @@ class Job:
     note: str | None = None
     attempt: int = 1
     cross_toolchain: str | None = None
+    input_file: str = "Minimize/Target.lean"
 
     @staticmethod
     def create(

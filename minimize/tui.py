@@ -278,8 +278,9 @@ class MinimizeDashboard(App):
             status = job.status.upper()
 
             ws = job.workspace_path()
-            loc = get_output_loc(ws)
-            imports = count_imports(ws)
+            inf = getattr(job, "input_file", "Minimize/Target.lean")
+            loc = get_output_loc(ws, inf)
+            imports = count_imports(ws, inf)
 
             loc_str = str(loc) if loc is not None else "-"
             imp_str = str(imports)
@@ -321,8 +322,9 @@ class MinimizeDashboard(App):
         if not job:
             return
         ws = job.workspace_path()
-        out_file = ws / "Minimize" / "Target.out.lean"
-        target = out_file if out_file.exists() else ws / "Minimize" / "Target.lean"
+        inf = getattr(job, "input_file", "Minimize/Target.lean")
+        out_file = ws / Path(inf).with_suffix(".out.lean")
+        target = out_file if out_file.exists() else ws / inf
         try:
             subprocess.Popen(
                 ["code", str(ws), str(target)],
@@ -333,12 +335,13 @@ class MinimizeDashboard(App):
             self.notify("VS Code ('code') not found", severity="error")
 
     def action_open_source(self) -> None:
-        """Open the workspace's source file (Minimize/Target.lean) in VS Code."""
+        """Open the workspace's source file in VS Code."""
         job = self._selected_job()
         if not job:
             return
         ws = job.workspace_path()
-        target = ws / "Minimize" / "Target.lean"
+        inf = getattr(job, "input_file", "Minimize/Target.lean")
+        target = ws / inf
         try:
             subprocess.Popen(
                 ["code", str(ws), str(target)],
@@ -454,31 +457,12 @@ class MinimizeDashboard(App):
             self.notify(f"Cannot resume job in state: {job.status}", severity="warning")
             return
 
+        from minimize.cli import prepare_resume
         from minimize.process import start_job
 
-        # Rotate log
-        ws = job.workspace_path()
-        log = ws / "minimize.log"
-        if log.exists():
-            n = 1
-            while (ws / f"minimize.log.{n}").exists():
-                n += 1
-            log.rename(ws / f"minimize.log.{n}")
-
-        # Add --resume if not already present (preserving order)
-        new_args = list(job.extra_args)
-        if "--resume" not in new_args:
-            new_args.append("--resume")
-
-        # Atomically update job state
-        self.store.update(
-            job.id,
-            status="created",
-            finished_at=None,
-            error_summary=None,
-            attempt=job.attempt + 1,
-            extra_args=new_args,
-        )
+        cycled = prepare_resume(job, self.store)
+        if cycled:
+            self.notify(f"Detected edit → {cycled}")
 
         # Reload fresh state and start
         job = self.store.get(job.id)
