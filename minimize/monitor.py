@@ -3,9 +3,9 @@
 from pathlib import Path
 
 
-def get_output_loc(workspace: Path) -> int | None:
+def get_output_loc(workspace: Path, input_file: str = "Minimize/Target.lean") -> int | None:
     """Count lines in the current output file."""
-    out_file = workspace / "Minimize" / "Target.out.lean"
+    out_file = workspace / Path(input_file).with_suffix(".out.lean")
     if not out_file.exists():
         return None
     try:
@@ -15,10 +15,10 @@ def get_output_loc(workspace: Path) -> int | None:
         return None
 
 
-def count_imports(workspace: Path) -> int:
+def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> int:
     """Count import lines in the current output (or source if no output yet)."""
-    out_file = workspace / "Minimize" / "Target.out.lean"
-    target = out_file if out_file.exists() else workspace / "Minimize" / "Target.lean"
+    out_file = workspace / Path(input_file).with_suffix(".out.lean")
+    target = out_file if out_file.exists() else workspace / input_file
     try:
         with open(target) as f:
             return sum(1 for line in f if line.strip().startswith("import "))

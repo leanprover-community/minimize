@@ -22,6 +22,100 @@ from minimize.workspace import create_workspace
 
 console = Console()
 
+_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "minimize", "GIT_AUTHOR_EMAIL": "minimize@localhost",
+    "GIT_COMMITTER_NAME": "minimize", "GIT_COMMITTER_EMAIL": "minimize@localhost",
+}
+
+
+def _next_cycle_number(input_file: str) -> int:
+    """Minimize/Target.lean → 2, Minimize/Target.2.lean → 3"""
+    stem = Path(input_file).stem
+    parts = stem.rsplit(".", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return int(parts[1]) + 1
+    return 2
+
+
+def prepare_resume(job: Job, store: JobStore) -> str | None:
+    """Prepare a job for resume: rotate log, detect human edits, update job state.
+
+    Returns the new input_file if a human edit was detected, or None.
+    """
+    ws = job.workspace_path()
+
+    # Rotate log
+    log_file = ws / "minimize.log"
+    if log_file.exists():
+        n = 1
+        while (ws / f"minimize.log.{n}").exists():
+            n += 1
+        log_file.rename(ws / f"minimize.log.{n}")
+
+    # Detect human edits to the output file
+    input_file = getattr(job, "input_file", "Minimize/Target.lean")
+    out_file = Path(input_file).with_suffix(".out.lean")
+    out_path = ws / out_file
+    cycled = None
+
+    if out_path.exists():
+        # Check for uncommitted changes (staged or unstaged) vs HEAD.
+        # Only detect edits if: git is available, workspace is a git repo, and the
+        # output file is tracked (otherwise it's a pre-upgrade workspace where the
+        # minimizer never committed on exit).
+        has_edit = False
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", str(out_file)],
+                cwd=ws, capture_output=True,
+            )
+            if tracked.returncode == 0:
+                r = subprocess.run(
+                    ["git", "status", "--porcelain", "--", str(out_file)],
+                    cwd=ws, capture_output=True, text=True,
+                )
+                has_edit = r.returncode == 0 and bool(r.stdout.strip())
+        except FileNotFoundError:
+            pass  # git not available — skip edit detection
+
+        if has_edit:
+            # Human edited the output — cycle to next numbered file
+            next_num = _next_cycle_number(input_file)
+            new_input = f"Minimize/Target.{next_num}.lean"
+            while (ws / new_input).exists():
+                next_num += 1
+                new_input = f"Minimize/Target.{next_num}.lean"
+            shutil.copy2(out_path, ws / new_input)
+            env = {**os.environ, **_GIT_ENV}
+            subprocess.run(
+                ["git", "add", str(out_file), new_input], cwd=ws, capture_output=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", f"Human edit → {new_input}"],
+                cwd=ws, capture_output=True, env=env,
+            )
+            input_file = new_input
+            cycled = new_input
+
+    new_args = list(job.extra_args)
+    if input_file != getattr(job, "input_file", "Minimize/Target.lean"):
+        # New input file — start fresh (no --resume)
+        new_args = [a for a in new_args if a != "--resume"]
+    else:
+        if "--resume" not in new_args:
+            new_args.append("--resume")
+
+    store.update(
+        job.id,
+        status="created",
+        finished_at=None,
+        error_summary=None,
+        attempt=job.attempt + 1,
+        extra_args=new_args,
+        input_file=input_file,
+    )
+    return cycled
+
 
 def _short_toolchain(tc: str) -> str:
     """Shorten a toolchain name for display (e.g. 'leanprover/lean4:v4.27.0' -> 'v4.27.0')."""
@@ -158,8 +252,9 @@ def list_jobs() -> None:
         }.get(job.status, "white")
 
         ws = job.workspace_path()
-        loc = get_output_loc(ws)
-        imports = count_imports(ws)
+        inf = getattr(job, "input_file", "Minimize/Target.lean")
+        loc = get_output_loc(ws, inf)
+        imports = count_imports(ws, inf)
 
         row: list[str] = [
             job.id,
@@ -232,8 +327,9 @@ def open_vscode(job_id: str) -> None:
     store = JobStore()
     job = _get_job(store, job_id)
     ws = job.workspace_path()
-    out_file = ws / "Minimize" / "Target.out.lean"
-    target = out_file if out_file.exists() else ws / "Minimize" / "Target.lean"
+    inf = getattr(job, "input_file", "Minimize/Target.lean")
+    out_file = ws / Path(inf).with_suffix(".out.lean")
+    target = out_file if out_file.exists() else ws / inf
     try:
         subprocess.Popen(
             ["code", str(ws), str(target)],
@@ -258,28 +354,9 @@ def resume(job_id: str) -> None:
         console.print(f"[yellow]Cannot resume job in state: {job.status}[/yellow]")
         sys.exit(1)
 
-    # Rotate log
-    ws = job.workspace_path()
-    log_file = ws / "minimize.log"
-    if log_file.exists():
-        n = 1
-        while (ws / f"minimize.log.{n}").exists():
-            n += 1
-        log_file.rename(ws / f"minimize.log.{n}")
-
-    # Add --resume preserving order
-    new_args = list(job.extra_args)
-    if "--resume" not in new_args:
-        new_args.append("--resume")
-
-    store.update(
-        job.id,
-        status="created",
-        finished_at=None,
-        error_summary=None,
-        attempt=job.attempt + 1,
-        extra_args=new_args,
-    )
+    cycled = prepare_resume(job, store)
+    if cycled:
+        console.print(f"[green]Detected edit → {cycled}[/green]")
 
     job = store.get(job.id)
     try:
@@ -327,7 +404,8 @@ def result(job_id: str | None) -> None:
             return
 
     for job in jobs:
-        out = job.workspace_path() / "Minimize" / "Target.out.lean"
+        inf = getattr(job, "input_file", "Minimize/Target.lean")
+        out = job.workspace_path() / Path(inf).with_suffix(".out.lean")
         if out.exists():
             if len(jobs) > 1:
                 console.print(f"\n[bold]--- {Path(job.source_file).stem} ({job.id}) ---[/bold]")
