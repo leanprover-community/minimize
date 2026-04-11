@@ -268,7 +268,7 @@ def list_jobs() -> None:
             job.duration_str(),
             str(loc) if loc is not None else "-",
             str(imports),
-            markup_escape((job.note or "")[:40]),
+            markup_escape(job.note or ""),
         ])
         table.add_row(*row)
 

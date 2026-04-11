@@ -284,7 +284,7 @@ class MinimizeDashboard(App):
 
             loc_str = str(loc) if loc is not None else "-"
             imp_str = str(imports)
-            note_str = markup_escape((job.note or "")[:30])
+            note_str = markup_escape(job.note or "")
             filename = markup_escape(Path(job.source_file).stem)
             project = markup_escape(job.project_name)
             cross_str = markup_escape(_short_toolchain(job.cross_toolchain)) if job.cross_toolchain else ""
