@@ -280,10 +280,10 @@ class MinimizeDashboard(App):
             ws = job.workspace_path()
             inf = getattr(job, "input_file", "Minimize/Target.lean")
             loc = get_output_loc(ws, inf)
-            imports = count_imports(ws, inf)
+            imp_count, imp_transitive = count_imports(ws, inf)
 
             loc_str = str(loc) if loc is not None else "-"
-            imp_str = str(imports)
+            imp_str = str(imp_count) if imp_transitive else f"{imp_count} direct"
             note_str = markup_escape(job.note or "")
             filename = markup_escape(Path(job.source_file).stem)
             project = markup_escape(job.project_name)
@@ -472,7 +472,8 @@ class MinimizeDashboard(App):
                 self._refresh_jobs()
                 self.notify(f"Resumed job {job.id} (attempt {job.attempt})")
             except Exception as e:
-                self.store.update(job.id, status="failed", error_summary=str(e))
+                self.store.update(job.id, status="failed", error_summary=str(e),
+                                  finished_at=datetime.now(timezone.utc).isoformat())
                 self.notify(f"Failed to resume: {e}", severity="error")
                 self._refresh_jobs()
 

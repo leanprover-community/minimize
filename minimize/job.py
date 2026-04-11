@@ -31,6 +31,8 @@ class Job:
     attempt: int = 1
     cross_toolchain: str | None = None
     input_file: str = "Minimize/Target.lean"
+    active_seconds: int = 0
+    attempt_started_at: str | None = None
 
     @staticmethod
     def create(
@@ -58,13 +60,12 @@ class Job:
         )
 
     def duration_str(self) -> str:
-        start = datetime.fromisoformat(self.created_at)
+        start = datetime.fromisoformat(self.attempt_started_at or self.created_at)
         if self.finished_at:
             end = datetime.fromisoformat(self.finished_at)
         else:
             end = datetime.now(timezone.utc)
-        delta = end - start
-        total_seconds = int(delta.total_seconds())
+        total_seconds = self.active_seconds + max(0, int((end - start).total_seconds()))
         hours, remainder = divmod(total_seconds, 3600)
         minutes, _ = divmod(remainder, 60)
         return f"{hours}h {minutes:02d}m"

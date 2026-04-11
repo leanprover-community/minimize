@@ -78,24 +78,25 @@ _import_pending: set[frozenset[str]] = set()
 _import_lock = threading.Lock()
 
 
-def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> int:
+def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> tuple[int, bool]:
     """Count transitive imports (excluding Init/Lean/Std) with caching.
 
-    Returns cached transitive count if available, otherwise returns direct count
-    immediately and kicks off a background computation for the transitive count.
+    Returns (count, is_transitive). If the transitive count isn't cached yet,
+    returns the direct count with is_transitive=False and kicks off a background
+    computation.
     """
     out_file = workspace / Path(input_file).with_suffix(".out.lean")
     target = out_file if out_file.exists() else workspace / input_file
 
     imports = _direct_imports(target)
     if not imports:
-        return 0
+        return (0, True)
 
     with _import_lock:
         if imports in _import_cache:
-            return _import_cache[imports]
+            return (_import_cache[imports], True)
         if imports in _import_pending:
-            return len(imports)  # background computation in flight
+            return (len(imports), False)
 
     # Return direct count now, compute transitive in background
     def _compute() -> None:
@@ -113,7 +114,7 @@ def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> 
                 _import_pending.discard(imports)
 
     threading.Thread(target=_compute, daemon=True).start()
-    return len(imports)
+    return (len(imports), False)
 
 
 def detect_phase(workspace: Path) -> str:

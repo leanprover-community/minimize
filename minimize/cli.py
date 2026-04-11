@@ -105,6 +105,20 @@ def prepare_resume(job: Job, store: JobStore) -> str | None:
         if "--resume" not in new_args:
             new_args.append("--resume")
 
+    # Accumulate active time from the attempt that just finished
+    prev_active = job.active_seconds
+    attempt_start = job.attempt_started_at
+    if attempt_start and job.finished_at:
+        start = datetime.fromisoformat(attempt_start)
+        end = datetime.fromisoformat(job.finished_at)
+        prev_active += max(0, int((end - start).total_seconds()))
+    elif job.attempt == 1 and job.finished_at:
+        # First attempt: safe to use created_at
+        start = datetime.fromisoformat(job.created_at)
+        end = datetime.fromisoformat(job.finished_at)
+        prev_active += max(0, int((end - start).total_seconds()))
+    # else: legacy resumed job with no attempt_started_at — don't accumulate unknowable time
+
     store.update(
         job.id,
         status="created",
@@ -113,6 +127,8 @@ def prepare_resume(job: Job, store: JobStore) -> str | None:
         attempt=job.attempt + 1,
         extra_args=new_args,
         input_file=input_file,
+        active_seconds=prev_active,
+        attempt_started_at=datetime.now(timezone.utc).isoformat(),
     )
     return cycled
 
@@ -254,7 +270,8 @@ def list_jobs() -> None:
         ws = job.workspace_path()
         inf = getattr(job, "input_file", "Minimize/Target.lean")
         loc = get_output_loc(ws, inf)
-        imports = count_imports(ws, inf)
+        imp_count, imp_transitive = count_imports(ws, inf)
+        imp_str = str(imp_count) if imp_transitive else f"{imp_count} direct"
 
         row: list[str] = [
             job.id,
@@ -267,7 +284,7 @@ def list_jobs() -> None:
         row.extend([
             job.duration_str(),
             str(loc) if loc is not None else "-",
-            str(imports),
+            imp_str,
             markup_escape(job.note or ""),
         ])
         table.add_row(*row)
@@ -362,7 +379,8 @@ def resume(job_id: str) -> None:
     try:
         start_job(job)
     except Exception as e:
-        store.update(job.id, status="failed", error_summary=str(e))
+        store.update(job.id, status="failed", error_summary=str(e),
+                     finished_at=datetime.now(timezone.utc).isoformat())
         console.print(f"[red]Failed to resume: {e}[/red]")
         sys.exit(1)
     console.print(f"[green]Resumed job {job.id} (attempt {job.attempt})[/green]")
