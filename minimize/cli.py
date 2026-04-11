@@ -59,11 +59,26 @@ def prepare_resume(job: Job, store: JobStore) -> str | None:
     cycled = None
 
     if out_path.exists():
-        r = subprocess.run(
-            ["git", "status", "--porcelain", "--", str(out_file)],
-            cwd=ws, capture_output=True, text=True,
-        )
-        if r.returncode == 0 and r.stdout.strip():
+        # Check for uncommitted changes (staged or unstaged) vs HEAD.
+        # Only detect edits if: git is available, workspace is a git repo, and the
+        # output file is tracked (otherwise it's a pre-upgrade workspace where the
+        # minimizer never committed on exit).
+        has_edit = False
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", str(out_file)],
+                cwd=ws, capture_output=True,
+            )
+            if tracked.returncode == 0:
+                r = subprocess.run(
+                    ["git", "status", "--porcelain", "--", str(out_file)],
+                    cwd=ws, capture_output=True, text=True,
+                )
+                has_edit = r.returncode == 0 and bool(r.stdout.strip())
+        except FileNotFoundError:
+            pass  # git not available — skip edit detection
+
+        if has_edit:
             # Human edited the output — cycle to next numbered file
             next_num = _next_cycle_number(input_file)
             new_input = f"Minimize/Target.{next_num}.lean"
