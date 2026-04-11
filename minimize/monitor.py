@@ -1,5 +1,7 @@
 """Status polling: LOC counting, import counting, phase detection from logs."""
 
+import subprocess
+import threading
 from pathlib import Path
 
 
@@ -15,15 +17,103 @@ def get_output_loc(workspace: Path, input_file: str = "Minimize/Target.lean") ->
         return None
 
 
-def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> int:
-    """Count import lines in the current output (or source if no output yet)."""
-    out_file = workspace / Path(input_file).with_suffix(".out.lean")
-    target = out_file if out_file.exists() else workspace / input_file
+def _direct_imports(target: Path) -> frozenset[str]:
+    """Extract the set of direct import module names from a Lean file."""
+    imports: set[str] = set()
     try:
         with open(target) as f:
-            return sum(1 for line in f if line.strip().startswith("import "))
+            for line in f:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("--") or stripped.startswith("/-"):
+                    continue
+                if "import " in stripped:
+                    mod = stripped.split()[-1]
+                    imports.add(mod)
+                elif not stripped.startswith("public") and not stripped.startswith("meta"):
+                    break
     except OSError:
+        pass
+    return frozenset(imports)
+
+
+_LEAN_SCRIPT = '''\
+import Lean
+open Lean in
+unsafe def main (args : List String) : IO Unit := do
+  let file := args.head!
+  initSearchPath (← findSysroot)
+  let input ← IO.FS.readFile file
+  let (imports, _, _) ← Elab.parseImports input file
+  let env ← importModules imports {} 0
+  let mut count := 0
+  for name in env.header.moduleNames do
+    let root := name.getRoot
+    if root != `Init && root != `Lean && root != `Std then
+      count := count + 1
+  IO.println s!"{count}"
+'''
+
+
+def _count_transitive_imports(workspace: Path, target: Path) -> int | None:
+    """Run a Lean subprocess to count transitive imports excluding Init/Lean/Std."""
+    script = workspace / ".lake" / "_count_imports.lean"
+    try:
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(_LEAN_SCRIPT)
+        r = subprocess.run(
+            ["lake", "env", "lean", "--run", str(script), str(target)],
+            cwd=workspace, capture_output=True, text=True, timeout=30,
+        )
+        if r.returncode == 0:
+            return int(r.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError, OSError):
+        pass
+    return None
+
+
+# Cache: frozenset of direct imports → transitive count
+_import_cache: dict[frozenset[str], int] = {}
+# Track in-flight background computations
+_import_pending: set[frozenset[str]] = set()
+_import_lock = threading.Lock()
+
+
+def count_imports(workspace: Path, input_file: str = "Minimize/Target.lean") -> int:
+    """Count transitive imports (excluding Init/Lean/Std) with caching.
+
+    Returns cached transitive count if available, otherwise returns direct count
+    immediately and kicks off a background computation for the transitive count.
+    """
+    out_file = workspace / Path(input_file).with_suffix(".out.lean")
+    target = out_file if out_file.exists() else workspace / input_file
+
+    imports = _direct_imports(target)
+    if not imports:
         return 0
+
+    with _import_lock:
+        if imports in _import_cache:
+            return _import_cache[imports]
+        if imports in _import_pending:
+            return len(imports)  # background computation in flight
+
+    # Return direct count now, compute transitive in background
+    def _compute() -> None:
+        with _import_lock:
+            _import_pending.add(imports)
+        try:
+            count = _count_transitive_imports(workspace, target)
+            with _import_lock:
+                if count is not None:
+                    _import_cache[imports] = count
+                else:
+                    _import_cache[imports] = len(imports)
+        finally:
+            with _import_lock:
+                _import_pending.discard(imports)
+
+    threading.Thread(target=_compute, daemon=True).start()
+    return len(imports)
 
 
 def detect_phase(workspace: Path) -> str:
