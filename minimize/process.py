@@ -31,7 +31,7 @@ def _generate_wrapper(job: Job) -> Path:
     extra = shlex.join(job.extra_args) if job.extra_args else ""
     marker_arg = f"--marker {shlex.quote(job.marker)}" if job.marker != "#guard_msgs" else ""
     cross_arg = f"--cross-toolchain {shlex.quote(job.cross_toolchain)}" if job.cross_toolchain else ""
-    args = f"Minimize/Target.lean {marker_arg} {cross_arg} {extra}".strip()
+    args = f"Minimize/Target.lean --git {marker_arg} {cross_arg} {extra}".strip()
 
     lines = [
         "#!/usr/bin/env bash",
