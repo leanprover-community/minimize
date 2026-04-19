@@ -144,9 +144,12 @@ def detect_phase(workspace: Path) -> str:
         except ValueError:
             return "failed"
 
-    # Check phase markers (find the last one)
+    # Check phase markers (find the last one). Order does NOT affect
+    # detection — we pick whichever marker appears most recently in the log.
     last_phase = None
-    for phase in ("cache_get", "building", "running"):
+    for phase in (
+        "cache_get", "building", "cross_cache_get", "cross_building", "running",
+    ):
         marker = f"---MINIMIZE-PHASE:{phase}---"
         if marker in tail:
             idx = tail.rfind(marker)

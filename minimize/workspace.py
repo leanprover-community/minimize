@@ -77,19 +77,34 @@ def workspace_dir(project_name: str, filename: str, source_file: Path) -> Path:
     return MINIMIZE_DIR / project_name / f"{filename}-{h}"
 
 
-def generate_lakefile_toml(project: ProjectInfo, use_path_dep: bool = True) -> str:
-    """Generate lakefile.toml content for the minimization workspace."""
+def generate_lakefile_toml(
+    project: ProjectInfo,
+    use_path_dep: bool = True,
+    *,
+    include_lean_minimizer: bool = True,
+) -> str:
+    """Generate lakefile.toml content for a minimization workspace.
+
+    When `include_lean_minimizer` is False, the `LeanMinimizer` require is
+    omitted. Cross workspaces only need to build the project's dependency
+    closure under an alternate toolchain — they never run `lake exe minimize`
+    themselves — so pulling in `LeanMinimizer` there is unnecessary (and may
+    even fail if it doesn't compile under the older toolchain).
+    """
     lines = [
         'name = "minimize-workspace"',
         'version = "0.1.0"',
         'defaultTargets = ["Minimize"]',
         "",
-        "[[require]]",
-        'name = "LeanMinimizer"',
-        f"git = {_toml_str(LEAN_MINIMIZER_REPO)}",
-        f"rev = {_toml_str(LEAN_MINIMIZER_REV)}",
-        "",
     ]
+    if include_lean_minimizer:
+        lines.extend([
+            "[[require]]",
+            'name = "LeanMinimizer"',
+            f"git = {_toml_str(LEAN_MINIMIZER_REPO)}",
+            f"rev = {_toml_str(LEAN_MINIMIZER_REV)}",
+            "",
+        ])
 
     if use_path_dep:
         # Try to resolve the source project to a git dependency for reproducibility
@@ -225,5 +240,58 @@ def create_workspace(
 
     # Initialize as a git repo so changes from the minimizer can be tracked
     _git_init(ws)
+
+    return ws
+
+
+def cross_workspace_path(primary_ws: Path) -> Path:
+    """Sibling directory that holds the cross-toolchain twin workspace."""
+    return primary_ws.parent / (primary_ws.name + ".cross")
+
+
+def create_cross_workspace(
+    project: ProjectInfo,
+    lean_file: Path,
+    primary_ws: Path,
+    cross_toolchain: str,
+    marker: str = "#guard_msgs",
+    use_path_dep: bool = True,
+) -> Path:
+    """Create a sibling Lake workspace pinned to `cross_toolchain`.
+
+    The cross workspace has the same dependency closure as the primary
+    workspace so that the target file's imports resolve identically — only
+    the `lean-toolchain` differs. The `LeanMinimizer` require is omitted
+    since the cross workspace never runs `lake exe minimize` itself; the
+    minimizer only uses it to compile the target under the alternate
+    toolchain via `lake env lean`.
+
+    Idempotent: if the directory already exists, it is reused as-is. The
+    wrapper script `lake build`s both workspaces on every run anyway, so a
+    stale directory is self-healing.
+    """
+    ws = cross_workspace_path(primary_ws)
+    content = lean_file.read_text()
+
+    if ws.exists():
+        # Trust but refresh: rewrite lean-toolchain and the target file so we
+        # don't accidentally reuse stale state from a previous run.
+        (ws / "lean-toolchain").write_text(cross_toolchain + "\n")
+        (ws / "Minimize" / "Target.lean").write_text(content)
+        return ws
+
+    ws.mkdir(parents=True)
+    (ws / "Minimize").mkdir()
+
+    (ws / "lean-toolchain").write_text(cross_toolchain + "\n")
+
+    lakefile = generate_lakefile_toml(
+        project, use_path_dep=use_path_dep, include_lean_minimizer=False,
+    )
+    (ws / "lakefile.toml").write_text(lakefile)
+
+    (ws / "Minimize" / "Target.lean").write_text(content)
+    (ws / "Minimize.lean").write_text("import Minimize.Target\n")
+    (ws / ".gitignore").write_text(".lake/\nlake-manifest.json\n")
 
     return ws
