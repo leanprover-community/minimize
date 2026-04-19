@@ -244,9 +244,28 @@ def create_workspace(
     return ws
 
 
-def cross_workspace_path(primary_ws: Path) -> Path:
-    """Sibling directory that holds the cross-toolchain twin workspace."""
-    return primary_ws.parent / (primary_ws.name + ".cross")
+def _sanitize_toolchain_name(toolchain: str) -> str:
+    """Turn a toolchain name into a filesystem-safe dir suffix.
+
+    `leanprover/lean4:v4.27.0` → `leanprover-lean4-v4.27.0`. We keep dots so
+    version numbers stay readable; everything else non-alphanumeric becomes a
+    single `-`.
+    """
+    import re
+    return re.sub(r"[^a-zA-Z0-9.]+", "-", toolchain).strip("-")
+
+
+def cross_workspace_path(primary_ws: Path, toolchain: str) -> Path:
+    """Sibling directory that holds the cross-toolchain twin workspace.
+
+    The path is keyed by toolchain so a user who sets up two jobs against the
+    same primary workspace with different `--cross-toolchain` values does not
+    silently overwrite one cross workspace with the other. Each cross
+    workspace is rebuilt independently; different toolchains produce
+    genuinely different artefacts under `.lake/build/`, and we don't want to
+    thrash one on top of the other.
+    """
+    return primary_ws.parent / f"{primary_ws.name}.cross-{_sanitize_toolchain_name(toolchain)}"
 
 
 def create_cross_workspace(
@@ -257,7 +276,7 @@ def create_cross_workspace(
     marker: str = "#guard_msgs",
     use_path_dep: bool = True,
 ) -> Path:
-    """Create a sibling Lake workspace pinned to `cross_toolchain`.
+    """Create (or refresh) a sibling Lake workspace pinned to `cross_toolchain`.
 
     The cross workspace has the same dependency closure as the primary
     workspace so that the target file's imports resolve identically — only
@@ -266,22 +285,18 @@ def create_cross_workspace(
     minimizer only uses it to compile the target under the alternate
     toolchain via `lake env lean`.
 
-    Idempotent: if the directory already exists, it is reused as-is. The
-    wrapper script `lake build`s both workspaces on every run anyway, so a
-    stale directory is self-healing.
+    On reuse, all derived files (`lean-toolchain`, `lakefile.toml`,
+    `Minimize.lean`, the target) are rewritten every call. The previous
+    implementation left `lakefile.toml` alone on reuse — if the primary's
+    dependency set changed between runs, the cross workspace silently kept a
+    stale dependency closure. Regenerating unconditionally is cheap and
+    closes that hole.
     """
-    ws = cross_workspace_path(primary_ws)
+    ws = cross_workspace_path(primary_ws, cross_toolchain)
     content = lean_file.read_text()
 
-    if ws.exists():
-        # Trust but refresh: rewrite lean-toolchain and the target file so we
-        # don't accidentally reuse stale state from a previous run.
-        (ws / "lean-toolchain").write_text(cross_toolchain + "\n")
-        (ws / "Minimize" / "Target.lean").write_text(content)
-        return ws
-
-    ws.mkdir(parents=True)
-    (ws / "Minimize").mkdir()
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Minimize").mkdir(exist_ok=True)
 
     (ws / "lean-toolchain").write_text(cross_toolchain + "\n")
 

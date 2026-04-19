@@ -31,7 +31,9 @@ def _generate_wrapper(job: Job) -> Path:
 
     extra = shlex.join(job.extra_args) if job.extra_args else ""
     marker_arg = f"--marker {shlex.quote(job.marker)}" if job.marker != "#guard_msgs" else ""
-    cross_ws = cross_workspace_path(ws) if job.cross_toolchain else None
+    cross_ws = (
+        cross_workspace_path(ws, job.cross_toolchain) if job.cross_toolchain else None
+    )
     cross_arg = (
         f"--cross-workspace {shlex.quote(str(cross_ws))}" if cross_ws else ""
     )
@@ -41,6 +43,15 @@ def _generate_wrapper(job: Job) -> Path:
     lines = [
         "#!/usr/bin/env bash",
         "set -o pipefail",
+        "",
+        # Locate the elan `lake` shim by absolute path. `lake env` will later
+        # inject the primary toolchain's `bin/` into PATH ahead of
+        # `$ELAN_HOME/bin`, so a bare `lake` could resolve to the primary
+        # toolchain's binary instead of the elan shim — the same bug the Lean
+        # side of the cross workspace work fixed. We use this for cross-ws
+        # `lake build` (where cwd's `lean-toolchain` matters) so the cross
+        # toolchain always wins.
+        'ELAN_LAKE="${ELAN_HOME:-$HOME/.elan}/bin/lake"',
         "",
         f"cd {shlex.quote(str(ws))}",
         "",
@@ -67,18 +78,19 @@ def _generate_wrapper(job: Job) -> Path:
     if cross_ws is not None:
         # Build the cross workspace independently so the `lake env lean` spawns
         # inside `lake exe minimize` have cross-toolchain oleans ready. We cd
-        # into the cross workspace and run its own lake; this gets the right
-        # toolchain via cwd's lean-toolchain file.
+        # into the cross workspace and invoke the elan shim by absolute path;
+        # that way cwd's `lean-toolchain` selects the toolchain, regardless of
+        # what PATH inherits from tmux.
         cross_ws_q = shlex.quote(str(cross_ws))
         if do_cache_get:
             lines.extend([
                 'echo "---MINIMIZE-PHASE:cross_cache_get---" >> minimize.log',
-                f"(cd {cross_ws_q} && lake exe cache get) 2>&1 | tee -a minimize.log",
+                f'(cd {cross_ws_q} && "$ELAN_LAKE" exe cache get) 2>&1 | tee -a minimize.log',
                 "",
             ])
         lines.extend([
             'echo "---MINIMIZE-PHASE:cross_building---" >> minimize.log',
-            f"(cd {cross_ws_q} && lake build) 2>&1 | tee -a minimize.log",
+            f'(cd {cross_ws_q} && "$ELAN_LAKE" build) 2>&1 | tee -a minimize.log',
             "cross_build_exit=$?",
             'if [ "$cross_build_exit" -ne 0 ]; then',
             '    echo "---MINIMIZE-EXIT:$cross_build_exit---" >> minimize.log',
