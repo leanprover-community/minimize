@@ -18,7 +18,7 @@ from minimize.job import Job, JobStore
 from minimize.monitor import count_imports, detect_phase, get_error_summary, get_output_loc
 from minimize.process import attach_job, is_running, kill_job, start_job
 from minimize.project import MinimizeError, find_project_root, has_mathlib_dependency, parse_project
-from minimize.workspace import create_workspace
+from minimize.workspace import create_cross_workspace, create_workspace
 
 console = Console()
 
@@ -205,6 +205,17 @@ def run(lean_file: str, marker: str, force: bool, note: str | None, cross_toolch
         sys.exit(1)
 
     console.print(f"Workspace: {ws}")
+
+    # Provision the sibling cross workspace when the user has asked for
+    # cross-version minimization. The wrapper script `lake build`s it before
+    # running the minimizer. We don't build it here; that happens inside the
+    # tmux session so long builds don't block the CLI invocation.
+    if cross_toolchain:
+        cross_ws = create_cross_workspace(
+            project, lean_path, ws, cross_toolchain,
+            marker=marker, use_path_dep=not mirror_deps,
+        )
+        console.print(f"Cross workspace: {cross_ws}")
 
     store = JobStore()
     job = Job.create(
