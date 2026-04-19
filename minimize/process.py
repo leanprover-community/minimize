@@ -82,6 +82,15 @@ def _generate_wrapper(job: Job) -> Path:
         # that way cwd's `lean-toolchain` selects the toolchain, regardless of
         # what PATH inherits from tmux.
         cross_ws_q = shlex.quote(str(cross_ws))
+        lines.extend([
+            "# Seed the cross workspace's lake-manifest.json from the primary.",
+            "# Without this, `lake build` in the cross ws sees no manifest and",
+            "# runs implicit resolve-deps, which adopts the dep's lean-toolchain",
+            "# and writes it into the cross ws's lean-toolchain file — defeating",
+            "# the whole point of a different cross toolchain.",
+            f'cp lake-manifest.json {cross_ws_q}/lake-manifest.json',
+            "",
+        ])
         if do_cache_get:
             lines.extend([
                 'echo "---MINIMIZE-PHASE:cross_cache_get---" >> minimize.log',
